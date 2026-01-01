@@ -1,0 +1,195 @@
+import network
+from machine import Pin, ADC
+import urequests
+import time
+try:
+    from bps_cre import *  # Contains ADAFRUIT_AIO_USERNAME, AIO_KEY, bps_ssid, bps_passw, twilio_sid, twilio_tok, twilio_num
+except:
+    pass
+
+# Adafruit IO Credentials
+AIO_USERNAME = "madhan4002"
+AIO_KEY = "aio_ShGM37MBhqj1vbvL50lagXO5vzqT"
+
+# Twilio Credentials
+account_sid = "ACa4b5309188fdf608d27c6b32f7157388"
+auth_token = "64b323e9cffc6dc5bf5b569c8e3c986a"
+sender_num = "+17623860321"
+recipient_num = "+918778514160"
+
+# Wi-Fi Credentials
+# SSID = "bps_wifi"
+# PASSWORD = "sagabps@235"
+
+SSID = "hello"
+PASSWORD = "hello12345"
+
+AIO_FEEDS = {
+    "distance": "level",
+    "gas": "gas"
+}
+
+# HC-SR04 Configuration
+trigger = Pin(18, Pin.OUT)  # Trigger pin D18
+echo = Pin(5, Pin.IN)      # Echo pin D5
+
+# MQ-2 Configuration
+mq2 = ADC(Pin(34))         # Analog pin for MQ-2 D34
+mq2.atten(ADC.ATTN_11DB)  # Set attenuation for 0-3.3V range
+
+# Buzzer Pin
+buz = Pin(14, Pin.OUT)
+buz.off()
+
+# Connect to Wi-Fi
+def connect_wifi():
+    wlan = network.WLAN(network.STA_IF)
+    wlan.active(True)
+    wlan.connect(SSID, PASSWORD)
+    timeout = time.time() + 30
+    while not wlan.isconnected() and time.time() < timeout:
+        time.sleep(1)
+    if wlan.isconnected():
+        print('Connected to WiFi:', wlan.ifconfig())
+    else:
+        raise Exception("Wi-Fi connection failed")
+
+# Read HC-SR04 Distance
+def get_distance():
+    try:
+        trigger.value(0)
+        time.sleep_us(2)
+        trigger.value(1)
+        time.sleep_us(10)
+        trigger.value(0)
+        timeout = time.ticks_ms() + 30
+        while echo.value() == 0 and time.ticks_ms() < timeout:
+            pass
+        if time.ticks_ms() >= timeout:
+            return None
+        start = time.ticks_us()
+        timeout = time.ticks_ms() + 30
+        while echo.value() == 1 and time.ticks_ms() < timeout:
+            pass
+        if time.ticks_ms() >= timeout:
+            return None
+        duration = time.ticks_us() - start
+        distance = (duration * 0.0343) / 2  # Speed of sound = 343 m/s
+        if 2 <= distance <= 400:  # HC-SR04 range: 2cm to 400cm
+            return round(distance, 2)
+        return None
+    except Exception as e:
+        print("Error reading HC-SR04:", e)
+        return None
+
+# Read MQ-2 Gas Sensor (Convert to Percentage)
+def get_gas_reading():
+    try:
+        value = mq2.read()  # Raw ADC value (0-4095)
+        percent = (value / 4095) * 100  # Convert to 0-100%
+        return round(percent, 2)
+    except Exception as e:
+        print("Error reading MQ-2:", e)
+        return None
+
+# Send data to Adafruit IO
+def send_to_adafruit(feed_key, value):
+    url = f"https://io.adafruit.com/api/v2/{AIO_USERNAME}/feeds/{AIO_FEEDS[feed_key]}/data"
+    headers = {
+        "Content-Type": "application/json",
+        "X-AIO-Key": AIO_KEY
+    }
+    payload = {"value": str(value)}
+    try:
+        response = urequests.post(url, json=payload, headers=headers)
+        if response.status_code == 200:
+            print(f"Data sent to Adafruit IO feed '{feed_key}'")
+        else:
+            print(f"Failed to send data to '{feed_key}': {response.status_code}, {response.text}")
+        response.close()
+    except Exception as e:
+        print(f"Error sending data to Adafruit IO feed '{feed_key}':", e)
+
+# Send SMS via Twilio
+def send_sms(recipient, sender, message, auth_token, account_sid):
+    headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+    data = "To={}&From={}&Body={}".format(recipient, sender, message)
+    url = "https://api.twilio.com/2010-04-01/Accounts/{}/Messages.json".format(account_sid)
+    try:
+        print("Trying to send SMS with Twilio")
+        response = urequests.post(url, data=data, auth=(account_sid, auth_token), headers=headers)
+        if response.status_code == 201:
+            print("SMS sent!")
+        else:
+            print(f"Error sending SMS: {response.status_code}, {response.text}")
+        response.close()
+    except Exception as e:
+        print("Error sending SMS:", e)
+
+# Main Function
+def main():
+    wlan = network.WLAN(network.STA_IF)
+    try:
+        connect_wifi()
+    except Exception as e:
+        print("Wi-Fi connection error:", e)
+        return
+    
+    # State flags to prevent repeated SMS
+    last_distance_alert = False
+    last_gas_alert = False
+    
+    while True:
+        buz.off()
+        if not wlan.isconnected():
+            print("Wi-Fi disconnected, reconnecting...")
+            try:
+                connect_wifi()
+            except Exception as e:
+                print("Wi-Fi reconnection failed:", e)
+                time.sleep(10)
+                continue
+        
+        distance = get_distance()
+        gas = get_gas_reading()
+        
+        # Check thresholds and send SMS if conditions are newly met
+        if distance is not None and distance <= 5:
+            buz.on()
+            time.sleep(0.1)  # Short pulse to avoid blocking
+            buz.off()
+            if not last_distance_alert:
+                message = f"Alert: Object detected at {distance} cm! Location: https://gps-coordinates.org/my-location.php?lat=11.384609&lng=79.697655"
+                send_sms(recipient_num, sender_num, message, auth_token, account_sid)
+                last_distance_alert = True
+        else:
+            last_distance_alert = False
+        
+        if gas is not None and gas >= 80:
+            buz.on()
+            time.sleep(0.1)
+            buz.off()
+            if not last_gas_alert:
+                message = f"Alert: High gas level detected: {gas}%! Location: https://gps-coordinates.org/my-location.php?lat=11.384609&lng=79.697655"
+                send_sms(recipient_num, sender_num, message, auth_token, account_sid)
+                last_gas_alert = True
+        else:
+            last_gas_alert = False
+        
+        # Send data to Adafruit IO
+        if distance is not None:
+            print(f"Distance: {distance} cm")
+            send_to_adafruit("distance", distance)
+        else:
+            print("No valid distance data")
+        
+        if gas is not None:
+            print(f"Gas: {gas}%")
+            send_to_adafruit("gas", gas)
+        else:
+            print("No valid gas data")
+        
+        time.sleep(30)  # Wait to avoid rate limits
+
+if __name__ == "__main__":
+    main()

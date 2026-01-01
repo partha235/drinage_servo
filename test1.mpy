@@ -1,0 +1,139 @@
+import network
+from machine import Pin, ADC
+import urequests
+import time
+try:
+    from bps_cre import *  # Contains ADAFRUIT_AIO_USERNAME, AIO_KEY, bps_ssid, bps_passw
+except:
+    pass
+
+# Adafruit IO Credentials
+AIO_USERNAME = "bps235"
+AIO_KEY = "aio_Fftv063N98XiE6UkkOlxjnjdEptz"
+AIO_FEEDS = {
+    "distance": "level",
+    "gas": "gas"
+}
+
+# Wi-Fi Credentials
+SSID = "bps_wifi"
+PASSWORD = "sagabps@235"
+
+# HC-SR04 Configuration
+trigger = Pin(18, Pin.OUT)  # Trigger pin D18
+echo = Pin(5, Pin.IN)      # Echo pin D5
+
+# MQ-2 Configuration
+mq2 = ADC(Pin(34))         # Analog pin for MQ-2 D34
+mq2.atten(ADC.ATTN_11DB)  # Set attenuation for 0-3.3V range
+
+# Buzzer Pin
+buz = Pin(14, Pin.OUT)
+buz.off()
+
+# Connect to Wi-Fi
+def connect_wifi():
+    wlan = network.WLAN(network.STA_IF)
+    wlan.active(True)
+    wlan.connect(SSID, PASSWORD)
+    timeout = time.time() + 30
+    while not wlan.isconnected() and time.time() < timeout:
+        time.sleep(1)
+    if wlan.isconnected():
+        print('Connected to WiFi:', wlan.ifconfig())
+    else:
+        raise Exception("Wi-Fi connection failed")
+
+# Read HC-SR04 Distance
+def get_distance():
+    try:
+        trigger.value(0)
+        time.sleep_us(2)
+        trigger.value(1)
+        time.sleep_us(10)
+        trigger.value(0)
+        timeout = time.ticks_ms() + 30
+        while echo.value() == 0 and time.ticks_ms() < timeout:
+            pass
+        if time.ticks_ms() >= timeout:
+            return None
+        start = time.ticks_us()
+        timeout = time.ticks_ms() + 30
+        while echo.value() == 1 and time.ticks_ms() < timeout:
+            pass
+        if time.ticks_ms() >= timeout:
+            return None
+        duration = time.ticks_us() - start
+        distance = (duration * 0.0343) / 2  # Speed of sound = 343 m/s
+        if 2 <= distance <= 400:  # HC-SR04 range: 2cm to 400cm
+            return round(distance, 2)
+        return None
+    except Exception as e:
+        print("Error reading HC-SR04:", e)
+        return None
+
+# Read MQ-2 Gas Sensor (Convert to Percentage)
+def get_gas_reading():
+    try:
+        value = mq2.read()  # Raw ADC value (0-4095)
+        percent = (value / 4095) * 100  # Convert to 0-100%
+        return round(percent, 2)
+    except Exception as e:
+        print("Error reading MQ-2:", e)
+        return None
+
+# Send data to Adafruit IO
+def send_to_adafruit(feed_key, value):
+    url = f"https://io.adafruit.com/api/v2/{AIO_USERNAME}/feeds/{AIO_FEEDS[feed_key]}/data"
+    headers = {
+        "Content-Type": "application/json",
+        "X-AIO-Key": AIO_KEY
+    }
+    payload = {"value": str(value)}
+    try:
+        response = urequests.post(url, json=payload, headers=headers)
+        if response.status_code == 200:
+            print(f"Data sent to Adafruit IO feed '{feed_key}'")
+        else:
+            print(f"Failed to send data to '{feed_key}': {response.status_code}, {response.text}")
+        response.close()
+    except Exception as e:
+        print(f"Error sending data to Adafruit IO feed '{feed_key}':", e)
+
+# Main Function
+def main():
+    wlan = network.WLAN(network.STA_IF)
+    try:
+        connect_wifi()
+    except Exception as e:
+        print("Wi-Fi connection error:", e)
+        return
+    while True:
+        buz.off()
+        if not wlan.isconnected():
+            print("Wi-Fi disconnected, reconnecting...")
+            try:
+                connect_wifi()
+            except Exception as e:
+                print("Wi-Fi reconnection failed:", e)
+                time.sleep(10)
+                continue
+        distance = get_distance()
+        gas = get_gas_reading()
+        if distance is not None and distance <= 5:
+            buz.on()
+            time.sleep(2)
+        if distance is not None:
+            print(f"Distance: {distance} cm")
+            send_to_adafruit("distance", distance)
+        else:
+            print("No valid distance data")
+        if gas is not None:
+            print(f"Gas: {gas}%")
+            send_to_adafruit("gas", gas)
+        else:
+            print("No valid gas data")
+        time.sleep(30)  # Wait to avoid Adafruit IO rate limits
+
+if __name__ == "__main__":
+    main()
