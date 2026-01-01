@@ -9,15 +9,15 @@ except:
 
 # Adafruit IO Credentials
 AIO_USERNAME = "bps235"
-AIO_KEY = "aio_Fftv063N98XiE6UkkOlxjnjdEptz"
+AIO_KEY = "***************"
 AIO_FEEDS = {
     "distance": "level",
     "gas": "gas"
 }
 
 # Wi-Fi Credentials
-SSID = "bps_wifi"
-PASSWORD = "sagabps@235"
+SSID = "hello"
+PASSWORD = "hello12345"
 
 # HC-SR04 Configuration
 trigger = Pin(18, Pin.OUT)  # Trigger pin D18

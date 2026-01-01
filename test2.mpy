@@ -9,17 +9,16 @@ except:
 
 # Adafruit IO Credentials
 AIO_USERNAME = "madhan4002"
-AIO_KEY = "aio_ShGM37MBhqj1vbvL50lagXO5vzqT"
+AIO_KEY = "************"
 
 # Twilio Credentials
-account_sid = "ACa4b5309188fdf608d27c6b32f7157388"
-auth_token = "64b323e9cffc6dc5bf5b569c8e3c986a"
-sender_num = "+17623860321"
-recipient_num = "+918778514160"
+account_sid = "***************"
+auth_token = "********************"
+sender_num = "+************"
+recipient_num = "+***********"
 
 # Wi-Fi Credentials
-# SSID = "bps_wifi"
-# PASSWORD = "sagabps@235"
+
 
 SSID = "hello"
 PASSWORD = "hello12345"
